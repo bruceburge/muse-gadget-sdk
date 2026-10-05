@@ -284,6 +284,15 @@ menu "ESP32 Device SDK"
             over I2C (SDA GPIO19, SCL GPIO20, address 0x44) and answer
             sensors.read with the latest temperature and humidity.
 
+    config HOMEHUB_RETERMINAL_SHT4X_TEMP_OFFSET
+        int "SHT4x temperature offset, in tenths of a degree Celsius"
+        depends on HOMEHUB_RETERMINAL_SHT4X
+        default -33
+        help
+            Calibration offset added to the SHT4x temperature reading, in
+            tenths of a degree Celsius. The onboard sensor reads warm from
+            board heat; -33 (-3.3 C, about -6 F) is a starting point.
+
     config HOMEHUB_DISPLAY_COMMANDS
         bool
         default y if HOMEHUB_DISPLAY
