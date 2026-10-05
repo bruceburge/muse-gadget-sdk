@@ -275,6 +275,15 @@ menu "ESP32 Device SDK"
             temperature and humidity need the Grove AHT20. Needs Seeed's stock
             RP2040 firmware.
 
+    config HOMEHUB_RETERMINAL_SHT4X
+        bool "reTerminal E100x onboard SHT4x sensor (sensors.read)"
+        depends on HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+        default y
+        help
+            Poll the onboard Sensirion SHT4x temperature and humidity sensor
+            over I2C (SDA GPIO19, SCL GPIO20, address 0x44) and answer
+            sensors.read with the latest temperature and humidity.
+
     config HOMEHUB_DISPLAY_COMMANDS
         bool
         default y if HOMEHUB_DISPLAY
