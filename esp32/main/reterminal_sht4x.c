@@ -137,6 +137,9 @@ static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static reading_t s_readings[SENSOR_COUNT];
 static i2c_master_dev_handle_t s_dev = NULL;
 
+// Board heat warms the onboard sensor; Kconfig offset, tenths of a C.
+#define SHT4X_TEMP_OFFSET_C (CONFIG_HOMEHUB_RETERMINAL_SHT4X_TEMP_OFFSET / 10.0f)
+
 static bool poll_once(void) {
     uint8_t cmd = SHT4X_CMD_MEASURE_HPM;
     uint8_t raw[6];
@@ -145,6 +148,7 @@ static bool poll_once(void) {
     if (i2c_master_receive(s_dev, raw, sizeof(raw), 100) != ESP_OK) return false;
     float temp_c, rh_pct;
     if (!sht4x_decode(raw, &temp_c, &rh_pct)) return false;
+    temp_c += SHT4X_TEMP_OFFSET_C;
     int64_t now = esp_timer_get_time();
     taskENTER_CRITICAL(&s_lock);
     s_readings[SENSOR_TEMPERATURE] = (reading_t){true, temp_c, now};
