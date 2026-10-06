@@ -66,7 +66,7 @@ session to Muse. The rest depends on the hardware.
 | UI and settings | — | — | — | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Experimental | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
 | Push-to-talk | — | — | — | — | — | — | — | ✅ | XIAO BOOT | ✅ | ✅ | ✅ | Text replies | Text replies | ✅ | ✅ | ✅ | Text replies (experimental) | ✅ | ✅ | ✅ | ✅ | ✅ | — | With an added I2S mic | — |
 | Speaker and mic | — | — | — | — | — | — | — | ✅ | 16 kHz I2S | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Buzzer and mic | ES8311 (experimental) | ✅ | ✅ | ✅ | ✅ | ES8311 | — | Speaker (NS4168), no mic | — |
-| Air sensors | — | — | — | — | D1S, D1Pro | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| Air sensors | — | — | — | — | D1S, D1Pro | Temperature, humidity | Temperature, humidity | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
 | Touch | — | — | — | — | — | — | — | — | — | ✅ | ✅ | — | ✅ | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
 | Battery status | — | — | — | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | ✅ | ✅ | ✅ | Voltage only | — | — | — |
 | Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | Off | On | On | On | On | On | On | On | On | Off | On | On | On | On | On | Off | On | On |
@@ -104,6 +104,11 @@ the same status screen, with the character in colour. Images from Muse are
 dithered to those six inks on the device (grays to black and white only),
 and each refresh takes about 30 seconds and flashes. `display.draw_url` tells
 Muse the six exact colours, the resolution and how slow it is.
+
+Both reTerminals have an SHT4x temperature and humidity sensor on board,
+which Muse reads with `sensors.read`. The board warms the sensor a little, so
+the temperature is corrected by `CONFIG_HOMEHUB_RETERMINAL_SHT4X_TEMP_OFFSET`
+(in tenths of a degree, -3.3 °C by default).
 
 The SenseCAP Watcher keeps its factory data (the identity SenseCraft uses) in
 an `nvsfactory` partition at `0x9000`, where Muse puts its partition table and
