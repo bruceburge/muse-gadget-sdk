@@ -161,6 +161,7 @@ static void sensors_task(void *arg) {
     (void)arg;
     stack_monitor_t stack = STACK_MONITOR_INIT;
     bool logged = false;
+    bool failing = false;
     for (;;) {
         if (poll_once()) {
             if (!logged) {
@@ -168,8 +169,13 @@ static void sensors_task(void *arg) {
                 ESP_LOGI(TAG, "first readings: %.1f C, %.1f %%RH",
                          s_readings[SENSOR_TEMPERATURE].value,
                          s_readings[SENSOR_HUMIDITY].value);
+            } else if (failing) {
+                ESP_LOGI(TAG, "sensor reads recovered");
             }
-        } else if (!logged) {
+            failing = false;
+        } else if (!failing) {
+            // Log once per run of failures, not every poll.
+            failing = true;
             ESP_LOGW(TAG, "sensor read failed; will retry");
         }
         stack_monitor_poll(&stack);
@@ -199,6 +205,7 @@ void reterminal_sht4x_init(void) {
     if (err == ESP_OK) err = i2c_master_bus_add_device(bus, &dev_cfg, &s_dev);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "no SHT4x at 0x%02x: %s", SHT4X_ADDR, esp_err_to_name(err));
+        if (bus) i2c_del_master_bus(bus);
         return;
     }
     if (xTaskCreate(sensors_task, "sht4x", 3072, NULL, 2, NULL) != pdPASS) {
