@@ -473,6 +473,15 @@ handled in `noise_control.cpp` itself; everything else goes through
    that `sensors.read` is advertised and dispatched under the same option, and
    runs its parser against a harness.
 
+Report environmental sensors (temperature, humidity, CO2, tVOC, light and so
+on) through `sensors.read`, on every board that has them, so Muse has one
+command to call wherever it runs. Don't add them to `device.health`, which is
+for the link itself (battery, power, network), or give them a board-specific
+command. Return each reading as `{value, unit, age_s}`, as
+`sensecap_sensors.c` does, and report a sensor with no recent reading as null.
+Read slow or I2C sensors in a background task and have `sensors.read` return
+the latest value.
+
 Muse sees the command once the board reconnects with the new firmware. Keep
 the management commands that `on_ws_command()` also handles (`device.list_vms`,
 `device.set_vm`, `device.reset_vm` and `device.unpair`) out of
