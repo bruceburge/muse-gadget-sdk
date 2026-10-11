@@ -203,9 +203,14 @@ static void scheduler_task(void *arg) {
         if (interval < 1) interval = 1;
 
         if (!first_fetch_done) {
-            do_dashboard_fetch();
-            first_fetch_done = true;
-            tick_counter = 0;
+            // Only mark first fetch done if a URL is configured.
+            // Otherwise retry in 60s until the user configures one.
+            char url_check[512];
+            if (config_get_str(KEY_DASHBOARD_URL, url_check, sizeof(url_check))) {
+                do_dashboard_fetch();
+                first_fetch_done = true;
+                tick_counter = 0;
+            }
             continue;
         }
 
