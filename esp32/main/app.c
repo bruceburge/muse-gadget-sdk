@@ -2110,9 +2110,7 @@ static cJSON *on_ws_command(
         return r;
     }
     if (strcmp(command, "display.auto_fetch_status") == 0) {
-        ESP_LOGI("cmd", "auto_fetch_status handler entered");
         char *js = auto_fetch_status_json();
-        ESP_LOGI("cmd", "auto_fetch_status json=%s", js ? js : "(null)");
         cJSON *r = cJSON_Parse(js ? js : "{}");
         free(js);
         return r ? r : cJSON_CreateObject();
