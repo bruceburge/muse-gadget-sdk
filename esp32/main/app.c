@@ -53,8 +53,11 @@
 #include "vm_connect.h"
 #include "noise_control.h"
 #include "image_fetch.h"
+#include "auto_fetch.h"
 #include "noise_tunnel.h"
 #include "led_status.h"
+#include "pixel_font.h"
+#include <strings.h>
 #include "button.h"
 #include "tunnel_netif.h"
 #include "net_discovery.h"
@@ -67,6 +70,9 @@
 #endif
 #if CONFIG_HOMEHUB_SENSECAP_SENSORS
 #include "sensecap_sensors.h"
+#endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+#include "reterminal_sht4x.h"
 #endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
@@ -1552,6 +1558,211 @@ static void draw_url_done(const image_fetch_result_t *r, void *user) {
     noise_ctrl_send_command_result(ctx->session_generation, ctx->request_id, result);
     free(ctx);
 }
+
+// ---- Text drawing (display.draw_text) ----------------------------------------
+
+typedef struct {
+    noise_ctrl_session_generation_t session_generation;
+    char request_id[64];
+    char *title;  // heap, may be NULL
+    char *body;   // heap
+    uint16_t title_color;  // byte-swapped RGB565 (high byte first in memory)
+    uint16_t body_color;
+} draw_text_task_args_t;
+
+static inline uint16_t draw_text_swap16(uint16_t v) {
+    return (uint16_t)((v << 8) | (v >> 8));
+}
+
+// Spectra 6 inks as native RGB565; returned byte-swapped for led_status_draw_rect.
+static bool draw_text_parse_ink(const char *name, uint16_t *out_swapped) {
+    static const struct { const char *name; uint16_t rgb565; } inks[] = {
+        { "black", 0x0000 }, { "white", 0xFFFF }, { "yellow", 0xFFE0 },
+        { "red", 0xF800 }, { "blue", 0x001F }, { "green", 0x07E0 },
+    };
+    if (!name) return false;
+    for (size_t i = 0; i < sizeof(inks) / sizeof(inks[0]); i++) {
+        if (strcasecmp(name, inks[i].name) == 0) {
+            *out_swapped = draw_text_swap16(inks[i].rgb565);
+            return true;
+        }
+    }
+    return false;
+}
+
+static const char *draw_text_string_default(cJSON *params, const char *key,
+                                            const char *dflt) {
+    cJSON *item = params ? cJSON_GetObjectItem(params, key) : NULL;
+    if (cJSON_IsString(item) && item->valuestring && item->valuestring[0]) {
+        return item->valuestring;
+    }
+    return dflt;
+}
+
+#define DRAW_TEXT_MAX_LINE 48
+#define DRAW_TEXT_MAX_LINES 64
+
+// Word-wrap text into lines of at most max_chars (< DRAW_TEXT_MAX_LINE).
+// Returns the line count.
+static int draw_text_wrap(const char *text, int max_chars,
+                          char lines[DRAW_TEXT_MAX_LINES][DRAW_TEXT_MAX_LINE]) {
+    int n = 0;
+    char cur[DRAW_TEXT_MAX_LINE];
+    int cur_len = 0;
+    const char *p = text;
+    while (*p && n < DRAW_TEXT_MAX_LINES) {
+        if (*p == '\n') {
+            cur[cur_len] = '\0';
+            snprintf(lines[n], DRAW_TEXT_MAX_LINE, "%s", cur);
+            n++;
+            cur_len = 0;
+            p++;
+            continue;
+        }
+        if (*p == ' ' || *p == '\t' || *p == '\r') {
+            p++;
+            continue;
+        }
+        const char *w = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n') p++;
+        int wlen = (int)(p - w);
+        int wi = 0;
+        while (wi < wlen && n < DRAW_TEXT_MAX_LINES) {
+            int room = max_chars - cur_len - (cur_len ? 1 : 0);
+            if (room <= 0) {
+                cur[cur_len] = '\0';
+                snprintf(lines[n], DRAW_TEXT_MAX_LINE, "%s", cur);
+                n++;
+                cur_len = 0;
+                continue;
+            }
+            int take = wlen - wi;
+            if (take > room) take = room;
+            if (cur_len) cur[cur_len++] = ' ';
+            int cp = take;
+            if (cp > DRAW_TEXT_MAX_LINE - cur_len - 1) cp = DRAW_TEXT_MAX_LINE - cur_len - 1;
+            memcpy(cur + cur_len, w + wi, (size_t)cp);
+            cur_len += cp;
+            wi += take;
+            cur[cur_len] = '\0';
+        }
+    }
+    if (cur_len && n < DRAW_TEXT_MAX_LINES) {
+        cur[cur_len] = '\0';
+        snprintf(lines[n], DRAW_TEXT_MAX_LINE, "%s", cur);
+        n++;
+    }
+    return n;
+}
+
+static void draw_text_glyph(uint16_t *fb, int w, int h, int x, int y, int scale,
+                            unsigned char ch, uint16_t color) {
+    if (ch < PIXEL_FONT_FIRST || ch > PIXEL_FONT_LAST) ch = '?';
+    const uint8_t *glyph = pixel_font[ch - PIXEL_FONT_FIRST];
+    for (int col = 0; col < PIXEL_FONT_WIDTH; col++) {
+        uint8_t bits = glyph[col];
+        for (int row = 0; row < PIXEL_FONT_HEIGHT; row++) {
+            if (bits & (1u << row)) {
+                int px = x + col * scale;
+                int py = y + row * scale;
+                for (int sy = 0; sy < scale; sy++) {
+                    int dy = py + sy;
+                    if (dy < 0 || dy >= h) continue;
+                    for (int sx = 0; sx < scale; sx++) {
+                        int dx = px + sx;
+                        if (dx >= 0 && dx < w) fb[(size_t)dy * w + dx] = color;
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void draw_text_line(uint16_t *fb, int w, int h, const char *line,
+                           int x, int y, int scale, uint16_t color) {
+    int cx = x;
+    for (const unsigned char *p = (const unsigned char *)line; *p; p++, cx += 6 * scale) {
+        draw_text_glyph(fb, w, h, cx, y, scale, *p, color);
+    }
+}
+
+#define DRAW_TEXT_STRIP_ROWS 20
+
+static void draw_text_task(void *arg) {
+    draw_text_task_args_t *args = arg;
+    cJSON *result = cJSON_CreateObject();
+    const char *code = NULL;
+    const char *message = NULL;
+    int w = 0, h = 0;
+    uint16_t *fb = NULL;
+    if (!led_status_display_info(&w, &h) || w <= 0 || h <= 0) {
+        code = "unsupported";
+        message = "no display";
+    } else {
+        fb = (uint16_t *)heap_caps_malloc((size_t)w * h * sizeof(uint16_t),
+                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!fb) {
+            code = "out_of_memory";
+            message = "failed to allocate framebuffer";
+        }
+    }
+    if (!code) {
+        uint16_t white = draw_text_swap16(0xFFFF);
+        size_t npix = (size_t)w * h;
+        for (size_t i = 0; i < npix; i++) fb[i] = white;
+
+        int y = 0;
+        if (args->title) {
+            char tlines[DRAW_TEXT_MAX_LINES][DRAW_TEXT_MAX_LINE];
+            int nt = draw_text_wrap(args->title, 22, tlines);
+            const int tscale = 6;
+            const int theight = PIXEL_FONT_HEIGHT * tscale;
+            y = 28;
+            for (int i = 0; i < nt && y + theight <= h - 16; i++) {
+                int tw = (int)strlen(tlines[i]) * 6 * tscale;
+                int tx = (w - tw) / 2;
+                if (tx < 8) tx = 8;
+                draw_text_line(fb, w, h, tlines[i], tx, y, tscale, args->title_color);
+                y += theight + 14;
+            }
+            y += 10;
+        } else {
+            y = 40;
+        }
+        char blines[DRAW_TEXT_MAX_LINES][DRAW_TEXT_MAX_LINE];
+        int nb = draw_text_wrap(args->body, 40, blines);
+        const int bscale = 3;
+        const int bheight = PIXEL_FONT_HEIGHT * bscale;
+        const int bx = 40;
+        for (int i = 0; i < nb && y + bheight <= h - 16; i++) {
+            draw_text_line(fb, w, h, blines[i], bx, y, bscale, args->body_color);
+            y += bheight + 8;
+        }
+
+        for (int ry = 0; ry < h && !code; ry += DRAW_TEXT_STRIP_ROWS) {
+            int rows = h - ry;
+            if (rows > DRAW_TEXT_STRIP_ROWS) rows = DRAW_TEXT_STRIP_ROWS;
+            if (!led_status_draw_rect(0, ry, w, rows, fb + (size_t)ry * w)) {
+                code = "internal";
+                message = "display write failed";
+            }
+        }
+        if (!code) led_status_draw_done();
+    }
+    if (fb) heap_caps_free(fb);
+    cJSON_AddBoolToObject(result, "ok", code == NULL);
+    if (code) {
+        cJSON *error = cJSON_AddObjectToObject(result, "error");
+        cJSON_AddStringToObject(error, "code", code);
+        cJSON_AddStringToObject(error, "message", message);
+    }
+    noise_ctrl_send_command_result(args->session_generation, args->request_id, result);
+    free(args->title);
+    free(args->body);
+    free(args);
+    stack_monitor_record(NULL);
+    vTaskDeleteWithCaps(NULL);
+}
 #endif
 
 #if CONFIG_MUSE_WATCHER_CAMERA
@@ -1873,6 +2084,77 @@ static cJSON *on_ws_command(
         cJSON_AddBoolToObject(result, "ok", true);
         return result;
     }
+    if (strcmp(command, "display.auto_fetch") == 0) {
+        const char *durl = NULL;
+        int fhrs = 0;
+        cJSON *p;
+        if (params) {
+            p = cJSON_GetObjectItem(params, "dashboard_url");
+            if (cJSON_IsString(p)) durl = p->valuestring;
+            if (!durl) {
+                p = cJSON_GetObjectItem(params, "morning_url");
+                if (cJSON_IsString(p)) durl = p->valuestring;
+            }
+            p = cJSON_GetObjectItem(params, "fetch_interval_hours");
+            if (cJSON_IsString(p)) fhrs = atoi(p->valuestring);
+            else if (cJSON_IsNumber(p)) fhrs = p->valueint;
+            if (!fhrs) {
+                p = cJSON_GetObjectItem(params, "alert_interval_hours");
+                if (cJSON_IsString(p)) fhrs = atoi(p->valuestring);
+                else if (cJSON_IsNumber(p)) fhrs = p->valueint;
+            }
+        }
+        auto_fetch_configure(durl, fhrs);
+        cJSON *r = cJSON_CreateObject();
+        cJSON_AddBoolToObject(r, "ok", true);
+        return r;
+    }
+    if (strcmp(command, "display.auto_fetch_status") == 0) {
+        char *js = auto_fetch_status_json();
+        cJSON *r = cJSON_Parse(js ? js : "{}");
+        free(js);
+        return r ? r : cJSON_CreateObject();
+    }
+    if (strcmp(command, "display.draw_text") == 0) {
+        char *body = json_strdup_string(params, "body");
+        if (!body) return command_error("missing_param", "body is required");
+        char *title = json_strdup_string(params, "title");
+        uint16_t title_color, body_color;
+        if (!draw_text_parse_ink(draw_text_string_default(params, "title_color", "red"),
+                                 &title_color)) {
+            free(body);
+            free(title);
+            return command_error("invalid_param", "unknown title_color");
+        }
+        if (!draw_text_parse_ink(draw_text_string_default(params, "body_color", "black"),
+                                 &body_color)) {
+            free(body);
+            free(title);
+            return command_error("invalid_param", "unknown body_color");
+        }
+        draw_text_task_args_t *args = calloc(1, sizeof(*args));
+        if (!args) {
+            free(body);
+            free(title);
+            return command_error("out_of_memory", "failed to allocate");
+        }
+        args->session_generation = session_generation;
+        strncpy(args->request_id, request_id, sizeof(args->request_id) - 1);
+        args->title = title;
+        args->body = body;
+        args->title_color = title_color;
+        args->body_color = body_color;
+        if (xTaskCreateWithCaps(draw_text_task, "draw_text", 12288, args, 4, NULL,
+                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+            free(args->title);
+            free(args->body);
+            free(args);
+            return command_error("out_of_memory", "failed to start draw task");
+        }
+        cJSON *async = cJSON_CreateObject();
+        cJSON_AddBoolToObject(async, "_async", true);
+        return async;
+    }
 #endif
 #if CONFIG_MUSE_WATCHER_CAMERA
     if (strcmp(command, "camera.capture") == 0) {
@@ -1898,6 +2180,11 @@ static cJSON *on_ws_command(
 #if CONFIG_HOMEHUB_SENSECAP_SENSORS
     if (strcmp(command, "sensors.read") == 0) {
         return sensecap_sensors_command();
+    }
+#endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+    if (strcmp(command, "sensors.read") == 0) {
+        return reterminal_sht4x_command();
     }
 #endif
     if (strcmp(command, "device.reset_vm") == 0) {
@@ -2480,6 +2767,7 @@ void app_run(void) {
 
     config_store_init();
     wifi_known_init();
+    auto_fetch_init();
 
     identity_init();
 #if CONFIG_MUSE_ENABLED
@@ -2628,6 +2916,9 @@ void app_run(void) {
 #endif
 #if CONFIG_HOMEHUB_SENSECAP_SENSORS
     sensecap_sensors_init();
+#endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+    reterminal_sht4x_init();
 #endif
 
     if (!setup_complete) {
