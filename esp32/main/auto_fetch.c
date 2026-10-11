@@ -237,6 +237,7 @@ bool auto_fetch_configure(const char *dashboard_url, int fetch_interval_hours) {
 
 char *auto_fetch_status_json(void) {
     cJSON *o = cJSON_CreateObject();
+    if (!o) return NULL;
     char buf[512];
     if (config_get_str(KEY_DASHBOARD_URL, buf, sizeof(buf)))
         cJSON_AddStringToObject(o, "dashboard_url", buf);
