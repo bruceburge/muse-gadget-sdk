@@ -26,6 +26,8 @@ set(GADGET_SRCS
     "bug_report.c"
     "ota.c"
     "image_fetch.c"
+    "auto_fetch.c"
+    "auto_fetch_http.c"
     "../avatar/happy_anim.c"
     "pixel_font.c"
     "button.c"
