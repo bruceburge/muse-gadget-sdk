@@ -1352,6 +1352,43 @@ static char *build_register_json(void) {
                          : "Clear the image and bring back the animation and "
                            "the agent's name.",
                     nullptr, nullptr);
+        // Scheduled image auto-fetch.
+        cJSON *af_optional = cJSON_CreateObject();
+        cJSON_AddItemToObject(af_optional, "dashboard_url",
+                              string_param("Fixed URL for the dashboard image."));
+        cJSON_AddItemToObject(af_optional, "fetch_interval_hours",
+                              string_param("Hours between dashboard fetches. Default 3."));
+        add_command(commands, "display.auto_fetch",
+                    "Configure scheduled dashboard image fetching.",
+                    nullptr, af_optional);
+        add_command(commands, "display.auto_fetch_status",
+                    "Report auto-fetch config and time sync state.",
+                    nullptr, nullptr);
+        cJSON *text_required = cJSON_CreateObject();
+        cJSON_AddItemToObject(text_required, "body",
+                              string_param("The main text to draw. Newlines are "
+                                           "kept; long lines are word-wrapped."));
+        cJSON *text_optional = cJSON_CreateObject();
+        cJSON_AddItemToObject(text_optional, "title",
+                              string_param("Optional title drawn centred above "
+                                           "the body."));
+        cJSON_AddItemToObject(text_optional, "title_color",
+                              string_param("Title ink: black, white, yellow, red, "
+                                           "blue or green. Default red."));
+        cJSON_AddItemToObject(text_optional, "body_color",
+                              string_param("Body ink: black, white, yellow, red, "
+                                           "blue or green. Default black."));
+        add_command(commands, "display.draw_text",
+                    "Draw text directly on the screen: an optional title and a body "
+                    "of text, rendered on-device in the six e-paper inks. Use for "
+                    "briefings, reminders, lists and other text content without "
+                    "fetching an image. Hides the status screen until "
+                    "display.show_animation.",
+                    text_required, text_optional);
+        // Same slow Spectra 6 refresh as display.draw_url.
+        cJSON_AddNumberToObject(
+            cJSON_GetObjectItem(commands, "display.draw_text"), "timeout_ms",
+            120000);
     }
 #endif
 
@@ -1375,6 +1412,13 @@ static char *build_register_json(void) {
                 "humidity in percent. Each reading has its age in seconds; a "
                 "sensor with no recent reading is null. Temperature and "
                 "humidity need the Grove AHT20 plugged in.",
+                nullptr, nullptr);
+#endif
+#if CONFIG_HOMEHUB_RETERMINAL_SHT4X
+    add_command(commands, "sensors.read",
+                "Read the onboard air sensor: temperature in degrees Celsius "
+                "and relative humidity in percent. Each reading has its age "
+                "in seconds; a sensor with no recent reading is null.",
                 nullptr, nullptr);
 #endif
 
