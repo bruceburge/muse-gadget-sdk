@@ -21,7 +21,7 @@
 static const char *TAG = "auto_fetch";
 
 // Config keys (NVS, survive reboot)
-#define KEY_DASHBOARD_URL "af_dashboard_url"
+#define KEY_DASHBOARD_URL "af_url"
 #define KEY_FETCH_HOURS   "af_fetch_hours"   // string int
 #define KEY_IMAGE_HASH    "af_image_hash"    // hex FNV-1a of last displayed image
 #define KEY_RESET_REASON  "af_reset_reason"  // reset reason string from last boot

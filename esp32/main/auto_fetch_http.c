@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "esp_http_client.h"
+#include "esp_crt_bundle.h"
 #include "esp_log.h"
 
 static const char *TAG = "auto_fetch_http";
@@ -37,6 +38,7 @@ uint8_t *auto_fetch_http_get(const char *url, size_t *out_len) {
         .event_handler = http_event,
         .user_data = &fb,
         .timeout_ms = 30000,
+        .crt_bundle_attach = esp_crt_bundle_attach,
         .buffer_size = 4096,
     };
     esp_http_client_handle_t c = esp_http_client_init(&cfg);

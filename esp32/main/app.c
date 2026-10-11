@@ -2104,7 +2104,12 @@ static cJSON *on_ws_command(
                 else if (cJSON_IsNumber(p)) fhrs = p->valueint;
             }
         }
-        auto_fetch_configure(durl, fhrs);
+        if (!durl && !fhrs) {
+            return command_error("missing_param", "dashboard_url or fetch_interval_hours required");
+        }
+        if (!auto_fetch_configure(durl, fhrs)) {
+            return command_error("config_save_failed", "failed to save auto-fetch config");
+        }
         cJSON *r = cJSON_CreateObject();
         cJSON_AddBoolToObject(r, "ok", true);
         return r;
