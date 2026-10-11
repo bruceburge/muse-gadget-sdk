@@ -2109,12 +2109,6 @@ static cJSON *on_ws_command(
         cJSON_AddBoolToObject(r, "ok", true);
         return r;
     }
-    if (strcmp(command, "display.auto_fetch_status") == 0) {
-        char *js = auto_fetch_status_json();
-        cJSON *r = cJSON_Parse(js ? js : "{}");
-        free(js);
-        return r ? r : cJSON_CreateObject();
-    }
     if (strcmp(command, "display.draw_text") == 0) {
         char *body = json_strdup_string(params, "body");
         if (!body) return command_error("missing_param", "body is required");

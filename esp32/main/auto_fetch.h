@@ -18,9 +18,6 @@ void auto_fetch_init(void);
 // fetch_interval_hours: how often to check the URL (e.g. 3)
 bool auto_fetch_configure(const char *dashboard_url, int fetch_interval_hours);
 
-// Returns current configuration as a JSON string (caller frees).
-char *auto_fetch_status_json(void);
-
 #ifdef __cplusplus
 }
 #endif

@@ -9,10 +9,13 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_sntp.h"
 #include "esp_netif.h"
 #include "esp_system.h"
+#include "esp_http_client.h"
+#include "esp_crt_bundle.h"
 #include "cJSON.h"
 
 static const char *TAG = "auto_fetch";
@@ -29,6 +32,9 @@ static const char *TAG = "auto_fetch";
 
 // Chicago timezone (CST/CDT with DST rules)
 #define CHICAGO_TZ "CST6CDT,M3.2.0,M11.1.0"
+
+// Forward declarations
+static void log_forward_init(void);
 
 static bool s_initialized = false;
 static bool s_sntp_started = false;
@@ -226,6 +232,7 @@ void auto_fetch_init(void) {
     if (s_initialized) return;
     s_initialized = true;
     log_reset_reason();
+    log_forward_init();
     xTaskCreate(scheduler_task, "auto_fetch", 8192, NULL, 3, NULL);
     ESP_LOGI(TAG, "Auto-fetch initialized");
 }
@@ -240,31 +247,102 @@ bool auto_fetch_configure(const char *dashboard_url, int fetch_interval_hours) {
     return true;
 }
 
-char *auto_fetch_status_json(void) {
-    cJSON *o = cJSON_CreateObject();
-    if (!o) return NULL;
-    char buf[512];
-    if (config_get_str(KEY_DASHBOARD_URL, buf, sizeof(buf)))
-        cJSON_AddStringToObject(o, "dashboard_url", buf);
-    cJSON_AddNumberToObject(o, "fetch_interval_hours",
-                            get_config_int(KEY_FETCH_HOURS, DEFAULT_FETCH_HOURS));
-    if (config_get_str(KEY_IMAGE_HASH, buf, sizeof(buf)))
-        cJSON_AddStringToObject(o, "last_image_hash", buf);
-    if (config_get_str(KEY_LAST_FETCH, buf, sizeof(buf)))
-        cJSON_AddStringToObject(o, "last_fetch", buf);
-    if (config_get_str(KEY_RESET_REASON, buf, sizeof(buf)))
-        cJSON_AddStringToObject(o, "reset_reason", buf);
+// ---- Remote log forwarding (temporary diagnostics) ----
+#define LOG_SERVER_URL "https://bruceburge.com/e1002/log-receiver.php"
+#define LOG_BUF_SIZE 8192
+#define LOG_SEND_INTERVAL_MS 300000  // 5 minutes
 
-    struct tm tm_now;
-    if (get_local_time(&tm_now)) {
-        char tbuf[32];
-        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M %Z", &tm_now);
-        cJSON_AddStringToObject(o, "device_time", tbuf);
-        cJSON_AddBoolToObject(o, "time_synced", true);
-    } else {
-        cJSON_AddBoolToObject(o, "time_synced", false);
+static char s_log_buf[LOG_BUF_SIZE];
+static size_t s_log_len = 0;
+static SemaphoreHandle_t s_log_mutex = NULL;
+static vprintf_like_t s_orig_vprintf = NULL;
+
+static int log_capture_vprintf(const char *fmt, va_list args) {
+    // Call original first so USB serial still works
+    int ret = 0;
+    if (s_orig_vprintf) {
+        va_list args_copy;
+        va_copy(args_copy, args);
+        ret = s_orig_vprintf(fmt, args_copy);
+        va_end(args_copy);
     }
-    char *s = cJSON_PrintUnformatted(o);
-    cJSON_Delete(o);
-    return s;
+    // Also capture into ring buffer (skip heartbeat spam)
+    if (s_log_mutex && xSemaphoreTake(s_log_mutex, 0) == pdTRUE) {
+        char tmp[256];
+        int n = vsnprintf(tmp, sizeof(tmp), fmt, args);
+        if (n > 0 && strstr(tmp, "link.heartbeat") == NULL) {
+            // Strip ANSI color codes for cleaner server logs
+            // Simple approach: copy printable chars, skip ESC sequences
+            for (int i = 0; i < n && tmp[i]; i++) {
+                if (tmp[i] == '\x1b') {
+                    // Skip until 'm'
+                    while (tmp[i] && tmp[i] != 'm') i++;
+                    continue;
+                }
+                if (s_log_len < LOG_BUF_SIZE - 1) {
+                    s_log_buf[s_log_len++] = tmp[i];
+                }
+            }
+            // If buffer full, drop oldest by shifting (simple, infrequent)
+            if (s_log_len >= LOG_BUF_SIZE - 256) {
+                size_t drop = 2048;
+                memmove(s_log_buf, s_log_buf + drop, s_log_len - drop);
+                s_log_len -= drop;
+            }
+        }
+        xSemaphoreGive(s_log_mutex);
+    }
+    return ret;
+}
+
+static void log_sender_task(void *arg) {
+    (void)arg;
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(LOG_SEND_INTERVAL_MS));
+        if (s_log_len == 0) continue;
+        if (!s_log_mutex) continue;
+
+        // Copy buffer under lock
+        char *copy = NULL;
+        size_t copy_len = 0;
+        if (xSemaphoreTake(s_log_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+            copy_len = s_log_len;
+            copy = malloc(copy_len + 1);
+            if (copy) {
+                memcpy(copy, s_log_buf, copy_len);
+                copy[copy_len] = '\0';
+                s_log_len = 0;
+            }
+            xSemaphoreGive(s_log_mutex);
+        }
+        if (!copy) continue;
+
+        // POST to server using image_fetch's HTTP client if available,
+        // otherwise use esp_http_client directly
+        esp_http_client_config_t config = {
+            .url = LOG_SERVER_URL,
+            .method = HTTP_METHOD_POST,
+            .crt_bundle_attach = esp_crt_bundle_attach,
+            .timeout_ms = 15000,
+        };
+        esp_http_client_handle_t client = esp_http_client_init(&config);
+        if (client) {
+            esp_http_client_set_header(client, "Content-Type", "text/plain");
+            esp_http_client_set_post_field(client, copy, copy_len);
+            esp_err_t err = esp_http_client_perform(client);
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "Log forward failed: %s", esp_err_to_name(err));
+            }
+            esp_http_client_cleanup(client);
+        }
+        free(copy);
+    }
+}
+
+static void log_forward_init(void) {
+    s_log_mutex = xSemaphoreCreateMutex();
+    if (!s_log_mutex) return;
+    s_orig_vprintf = esp_log_set_vprintf(log_capture_vprintf);
+    xTaskCreate(log_sender_task, "log_fwd", 8192, NULL, 2, NULL);
+    ESP_LOGI(TAG, "Remote log forwarding initialized");
 }

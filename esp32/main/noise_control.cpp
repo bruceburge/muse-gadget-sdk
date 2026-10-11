@@ -1361,9 +1361,6 @@ static char *build_register_json(void) {
         add_command(commands, "display.auto_fetch",
                     "Configure scheduled dashboard image fetching.",
                     nullptr, af_optional);
-        add_command(commands, "display.auto_fetch_status",
-                    "Report auto-fetch config and time sync state.",
-                    nullptr, nullptr);
         cJSON *text_required = cJSON_CreateObject();
         cJSON_AddItemToObject(text_required, "body",
                               string_param("The main text to draw. Newlines are "
