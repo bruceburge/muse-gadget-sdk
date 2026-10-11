@@ -248,8 +248,9 @@ char *auto_fetch_status_json(void) {
         cJSON_AddStringToObject(o, "dashboard_url", buf);
     cJSON_AddNumberToObject(o, "fetch_interval_hours",
                             get_config_int(KEY_FETCH_HOURS, DEFAULT_FETCH_HOURS));
-    if (config_get_str(KEY_IMAGE_HASH, buf, sizeof(buf)))
-        cJSON_AddStringToObject(o, "last_image_hash", buf);
+    // Temporarily disabled for diagnostics
+    // if (config_get_str(KEY_IMAGE_HASH, buf, sizeof(buf)))
+    //     cJSON_AddStringToObject(o, "last_image_hash", buf);
     if (config_get_str(KEY_LAST_FETCH, buf, sizeof(buf)))
         cJSON_AddStringToObject(o, "last_fetch", buf);
     if (config_get_str(KEY_RESET_REASON, buf, sizeof(buf)))
