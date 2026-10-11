@@ -2104,7 +2104,7 @@ static cJSON *on_ws_command(
                 else if (cJSON_IsNumber(p)) fhrs = p->valueint;
             }
         }
-        if (!durl && !fhrs) {
+        if (!auto_fetch_params_valid(durl, fhrs)) {
             return command_error("missing_param", "dashboard_url or fetch_interval_hours required");
         }
         if (!auto_fetch_configure(durl, fhrs)) {

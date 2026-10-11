@@ -16,7 +16,14 @@ void auto_fetch_init(void);
 // Configure the fetch schedule. Any NULL parameter leaves that setting unchanged.
 // dashboard_url: fixed URL for the dashboard image (e.g. https://bruceburge.com/e1002/weather.jpg)
 // fetch_interval_hours: how often to check the URL (e.g. 3)
+// Returns false if a supplied value could not be persisted.
 bool auto_fetch_configure(const char *dashboard_url, int fetch_interval_hours);
+
+// Testable helpers (also used by the scheduler and the command handler).
+// Exposed for host unit tests; safe to call on device too.
+int auto_fetch_sanitize_interval(int raw_hours);
+bool auto_fetch_tick_due(int *tick_counter, int interval_hours);
+bool auto_fetch_params_valid(const char *dashboard_url, int fetch_interval_hours);
 
 #ifdef __cplusplus
 }
