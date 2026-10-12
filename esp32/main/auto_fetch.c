@@ -145,7 +145,7 @@ static void dashboard_fetch_done(const image_fetch_result_t *result, void *user)
 
 // Fetch the dashboard, display it only if the content changed.
 // Returns true if a fetch was attempted (regardless of outcome).
-static bool do_dashboard_fetch(void) {
+static bool do_dashboard_fetch(bool force) {
     char url[AF_URL_BUF_SIZE];
     if (!config_get_str(KEY_DASHBOARD_URL, url, sizeof(url))) {
         ESP_LOGI(TAG, "Dashboard fetch skipped: no URL configured");
@@ -175,11 +175,13 @@ static bool do_dashboard_fetch(void) {
     fnv_hex(data, len, hash);
     free(data);
 
-    char last_hash[40];
-    if (config_get_str(KEY_IMAGE_HASH, last_hash, sizeof(last_hash)) &&
-        strcmp(last_hash, hash) == 0) {
-        ESP_LOGI(TAG, "Dashboard unchanged, skipping display");
-        return true;
+    if (!force) {
+        char last_hash[40];
+        if (config_get_str(KEY_IMAGE_HASH, last_hash, sizeof(last_hash)) &&
+            strcmp(last_hash, hash) == 0) {
+            ESP_LOGI(TAG, "Dashboard unchanged, skipping display");
+            return true;
+        }
     }
 
     ESP_LOGI(TAG, "Dashboard changed, displaying");
@@ -254,7 +256,7 @@ static void scheduler_task(void *arg) {
             // Otherwise retry in 60s until the user configures one.
             char url_check[AF_URL_BUF_SIZE];
             if (config_get_str(KEY_DASHBOARD_URL, url_check, sizeof(url_check))) {
-                do_dashboard_fetch();
+                do_dashboard_fetch(true);
                 first_fetch_done = true;
                 tick_counter = 0;
             }
@@ -262,7 +264,7 @@ static void scheduler_task(void *arg) {
         }
 
         if (auto_fetch_tick_due(&tick_counter, interval)) {
-            do_dashboard_fetch();
+            do_dashboard_fetch(false);
         }
     }
 }

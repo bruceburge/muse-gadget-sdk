@@ -185,7 +185,7 @@ MU_TEST(fnv_hex_vectors) {
 
 MU_TEST(dashboard_fetch_no_url) {
     reset_all();
-    mu_assert(do_dashboard_fetch() == false);  // nothing configured
+    mu_assert(do_dashboard_fetch(false) == false);  // nothing configured
     mu_assert_int_eq(mock_image_fetch_start_count, 0);
 }
 
@@ -195,7 +195,7 @@ MU_TEST(dashboard_fetch_changed_displays) {
     mock_http_body = "hello";
     mock_image_fetch_start_result = true;
     mock_image_fetch_result_ok = true;
-    mu_assert(do_dashboard_fetch() == true);
+    mu_assert(do_dashboard_fetch(false) == true);
     mu_assert_int_eq(mock_image_fetch_start_count, 1);
     mu_assert_str_eq(mock_image_fetch_last_url, "https://example.com/w.jpg");
     // Hash of the displayed image must be stored for change detection.
@@ -212,7 +212,7 @@ MU_TEST(dashboard_fetch_unchanged_skips) {
     fnv_hex((const uint8_t *)"hello", 5, want);
     config_set_str(KEY_IMAGE_HASH, want);  // pretend we already showed it
     mock_http_body = "hello";
-    mu_assert(do_dashboard_fetch() == true);
+    mu_assert(do_dashboard_fetch(false) == true);
     mu_assert_int_eq(mock_image_fetch_start_count, 0);  // skipped: unchanged
 }
 
@@ -220,7 +220,7 @@ MU_TEST(dashboard_fetch_http_failure) {
     reset_all();
     config_set_str(KEY_DASHBOARD_URL, "https://example.com/w.jpg");
     mock_http_perform_result = ESP_FAIL;
-    mu_assert(do_dashboard_fetch() == true);  // attempted; screen keeps old image
+    mu_assert(do_dashboard_fetch(false) == true);  // attempted; screen keeps old image
     mu_assert_int_eq(mock_image_fetch_start_count, 0);
     char got[64];
     mu_assert(config_get_str(KEY_IMAGE_HASH, got, sizeof(got)) == false);
@@ -233,7 +233,7 @@ MU_TEST(dashboard_fetch_start_failure_keeps_hash) {
     config_set_str(KEY_DASHBOARD_URL, "https://example.com/w.jpg");
     mock_http_body = "hello";
     mock_image_fetch_start_result = false;
-    mu_assert(do_dashboard_fetch() == true);
+    mu_assert(do_dashboard_fetch(false) == true);
     mu_assert_int_eq(mock_image_fetch_start_count, 1);
     char got[64];
     mu_assert(config_get_str(KEY_IMAGE_HASH, got, sizeof(got)) == false);
@@ -317,6 +317,17 @@ MU_TEST(buffer_sizes_fit_worst_case) {
     mu_assert(n == (int)sizeof(url) - 1 && n < (int)sizeof(url));
 }
 
+MU_TEST(dashboard_fetch_force_displays_despite_unchanged) {
+    reset_all();
+    config_set_str(KEY_DASHBOARD_URL, "https://example.com/w.jpg");
+    char want[AF_HASH_HEX_SIZE];
+    fnv_hex((const uint8_t *)"hello", 5, want);
+    config_set_str(KEY_IMAGE_HASH, want);
+    mock_http_body = "hello";
+    mu_assert(do_dashboard_fetch(true) == true);
+    mu_assert_int_eq(mock_image_fetch_start_count, 1);
+}
+
 int main(void) {
     printf("auto_fetch host unit tests\n");
     MU_RUN(nvs_keys_within_limit);
@@ -333,6 +344,7 @@ int main(void) {
     MU_RUN(dashboard_fetch_no_url);
     MU_RUN(dashboard_fetch_changed_displays);
     MU_RUN(dashboard_fetch_unchanged_skips);
+    MU_RUN(dashboard_fetch_force_displays_despite_unchanged);
     MU_RUN(dashboard_fetch_http_failure);
     MU_RUN(dashboard_fetch_start_failure_keeps_hash);
     MU_RUN(dashboard_fetch_done_callback);

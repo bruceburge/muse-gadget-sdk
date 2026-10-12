@@ -10,7 +10,7 @@
 #   make run     # only build + run the test binary
 #   make clean
 CC      ?= gcc
-MAINDIR  = ../main
+MAINDIR  = ../../main
 MOCKDIR  = mocks
 CFLAGS   = -std=c11 -D_GNU_SOURCE -Wall -Wextra -g -I$(MOCKDIR) -I$(MAINDIR)
 SRCS     = test_auto_fetch.c \
